@@ -1,0 +1,266 @@
+import { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { getWorkout, createWorkout, updateWorkout, getWorkoutTypes } from '../../api/workouts.api';
+
+const WorkoutForm = () => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const isEditing = Boolean(id);
+
+  const [workoutTypes, setWorkoutTypes] = useState([]);
+  const [formData, setFormData] = useState({
+    type: '',
+    date: new Date().toISOString().split('T')[0],
+    duration: '',
+    calories: '',
+    notes: '',
+    exercises: [],
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    fetchWorkoutTypes();
+    if (isEditing) {
+      fetchWorkout();
+    }
+  }, [id]);
+
+  const fetchWorkoutTypes = async () => {
+    try {
+      const types = await getWorkoutTypes();
+      setWorkoutTypes(types);
+      if (!isEditing && types.length > 0) {
+        setFormData((prev) => ({ ...prev, type: types[0].name }));
+      }
+    } catch (err) {
+      setWorkoutTypes([
+        { name: 'Strength Training' },
+        { name: 'Cardio' },
+        { name: 'HIIT' },
+        { name: 'Yoga' },
+        { name: 'Other' },
+      ]);
+    }
+  };
+
+  const fetchWorkout = async () => {
+    setLoading(true);
+    try {
+      const data = await getWorkout(id);
+      setFormData({
+        type: data.type || '',
+        date: data.date?.split('T')[0] || '',
+        duration: data.duration || '',
+        calories: data.calories || '',
+        notes: data.notes || '',
+        exercises: data.exercises || [],
+      });
+    } catch (err) {
+      setError('Failed to load workout');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const addExercise = () => {
+    setFormData((prev) => ({
+      ...prev,
+      exercises: [
+        ...prev.exercises,
+        { name: '', sets: '', reps: '', weight: '' },
+      ],
+    }));
+  };
+
+  const updateExercise = (index, field, value) => {
+    setFormData((prev) => ({
+      ...prev,
+      exercises: prev.exercises.map((ex, i) =>
+        i === index ? { ...ex, [field]: value } : ex
+      ),
+    }));
+  };
+
+  const removeExercise = (index) => {
+    setFormData((prev) => ({
+      ...prev,
+      exercises: prev.exercises.filter((_, i) => i !== index),
+    }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const payload = {
+        ...formData,
+        duration: parseInt(formData.duration, 10) || 0,
+        calories: parseInt(formData.calories, 10) || 0,
+      };
+
+      if (isEditing) {
+        await updateWorkout(id, payload);
+      } else {
+        await createWorkout(payload);
+      }
+      navigate('/workouts');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to save workout');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading && isEditing) {
+    return <div className="loading">Loading workout...</div>;
+  }
+
+  return (
+    <div className="workout-form">
+      <h1>{isEditing ? 'Edit Workout' : 'Log Workout'}</h1>
+
+      {error && <div className="error-message">{error}</div>}
+
+      <form onSubmit={handleSubmit}>
+        <div className="form-row">
+          <div className="form-group">
+            <label htmlFor="type">Workout Type</label>
+            <select
+              id="type"
+              name="type"
+              value={formData.type}
+              onChange={handleChange}
+              required
+            >
+              {workoutTypes.map((type) => (
+                <option key={type.name} value={type.name}>
+                  {type.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="date">Date</label>
+            <input
+              type="date"
+              id="date"
+              name="date"
+              value={formData.date}
+              onChange={handleChange}
+              required
+            />
+          </div>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label htmlFor="duration">Duration (minutes)</label>
+            <input
+              type="number"
+              id="duration"
+              name="duration"
+              value={formData.duration}
+              onChange={handleChange}
+              min="1"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="calories">Calories Burned (optional)</label>
+            <input
+              type="number"
+              id="calories"
+              name="calories"
+              value={formData.calories}
+              onChange={handleChange}
+              min="0"
+            />
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label>Exercises</label>
+          {formData.exercises.map((exercise, index) => (
+            <div key={index} className="exercise-row">
+              <input
+                type="text"
+                placeholder="Exercise name"
+                value={exercise.name}
+                onChange={(e) => updateExercise(index, 'name', e.target.value)}
+              />
+              <input
+                type="number"
+                placeholder="Sets"
+                value={exercise.sets}
+                onChange={(e) => updateExercise(index, 'sets', e.target.value)}
+              />
+              <input
+                type="number"
+                placeholder="Reps"
+                value={exercise.reps}
+                onChange={(e) => updateExercise(index, 'reps', e.target.value)}
+              />
+              <input
+                type="number"
+                placeholder="Weight (kg)"
+                value={exercise.weight}
+                onChange={(e) => updateExercise(index, 'weight', e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => removeExercise(index)}
+                className="btn btn-small btn-danger"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={addExercise}
+            className="btn btn-secondary"
+          >
+            Add Exercise
+          </button>
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="notes">Notes (optional)</label>
+          <textarea
+            id="notes"
+            name="notes"
+            value={formData.notes}
+            onChange={handleChange}
+            rows="3"
+            placeholder="How did the workout go?"
+          />
+        </div>
+
+        <div className="form-actions">
+          <button type="submit" className="btn btn-primary" disabled={loading}>
+            {loading ? 'Saving...' : isEditing ? 'Update Workout' : 'Log Workout'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => navigate('/workouts')}
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+export default WorkoutForm;
