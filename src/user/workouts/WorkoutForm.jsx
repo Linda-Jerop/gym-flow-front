@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useAuth } from '../../auth/AuthContext';
+import { getMembers } from '../../api/members.api';
 import { getWorkout, createWorkout, updateWorkout, getWorkoutTypes } from '../../api/workouts.api';
 
 const WorkoutForm = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const isEditing = Boolean(id);
+  const { user, isAdmin } = useAuth();
 
   const [workoutTypes, setWorkoutTypes] = useState([]);
   const [formData, setFormData] = useState({
@@ -15,16 +18,22 @@ const WorkoutForm = () => {
     calories: '',
     notes: '',
     exercises: [],
+    memberId: '',
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [members, setMembers] = useState([]);
 
   useEffect(() => {
     fetchWorkoutTypes();
     if (isEditing) {
       fetchWorkout();
     }
-  }, [id]);
+    // If not editing and user is present, set default member for non-admins
+    if (!isEditing && user && !isAdmin()) {
+      setFormData((prev) => ({ ...prev, memberId: user.memberId || user.id }));
+    }
+  }, [id, user]);
 
   const fetchWorkoutTypes = async () => {
     try {
@@ -42,6 +51,22 @@ const WorkoutForm = () => {
         { name: 'Other' },
       ]);
     }
+    // If admin, also fetch members for linking workouts
+    if (isAdmin()) {
+      fetchMembers();
+    }
+  };
+
+  const fetchMembers = async () => {
+    try {
+      const list = await getMembers();
+      setMembers(list || []);
+      if (!isEditing && list && list.length > 0 && !formData.memberId) {
+        setFormData((prev) => ({ ...prev, memberId: list[0].id }));
+      }
+    } catch (err) {
+      // ignore - members optional for non-admins
+    }
   };
 
   const fetchWorkout = async () => {
@@ -55,6 +80,7 @@ const WorkoutForm = () => {
         calories: data.calories || '',
         notes: data.notes || '',
         exercises: data.exercises || [],
+        memberId: data.memberId || data.member_id || '',
       });
     } catch (err) {
       setError('Failed to load workout');
@@ -66,6 +92,17 @@ const WorkoutForm = () => {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const validateExercises = (exercises) => {
+    for (let i = 0; i < exercises.length; i++) {
+      const ex = exercises[i];
+      if (!ex.name || ex.name.trim() === '') return `Exercise #${i + 1} is missing a name`;
+      if (ex.sets !== '' && (!Number.isInteger(Number(ex.sets)) || Number(ex.sets) < 1)) return `Exercise #${i + 1} sets must be an integer >= 1`;
+      if (ex.reps !== '' && (!Number.isInteger(Number(ex.reps)) || Number(ex.reps) < 1)) return `Exercise #${i + 1} reps must be an integer >= 1`;
+      if (ex.weight !== '' && (isNaN(Number(ex.weight)) || Number(ex.weight) < 0)) return `Exercise #${i + 1} weight must be a number >= 0`;
+    }
+    return null;
   };
 
   const addExercise = () => {
@@ -100,6 +137,25 @@ const WorkoutForm = () => {
     setLoading(true);
 
     try {
+      // client-side validation for exercises
+      const exerciseError = validateExercises(formData.exercises || []);
+      if (exerciseError) {
+        setError(exerciseError);
+        setLoading(false);
+        return;
+      }
+
+      // ensure memberId is present; default to current user when available
+      if (!formData.memberId) {
+        if (user) {
+          formData.memberId = user.memberId || user.id;
+        } else {
+          setError('Member must be selected or you must be logged in');
+          setLoading(false);
+          return;
+        }
+      }
+
       const payload = {
         ...formData,
         duration: parseInt(formData.duration, 10) || 0,
